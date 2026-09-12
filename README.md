@@ -1,6 +1,6 @@
 # Data Intelligence Platform
 
-A personal project I built to learn about data engineering and AI. It simulates a small company's data spread across multiple databases, then runs a pipeline to profile it, find quality issues, detect PII, and let an LLM answer questions about it in plain English.
+AI-powered data management platform for profiling, entity resolution, governance, and natural-language querying.
 
 ## What it does
 
