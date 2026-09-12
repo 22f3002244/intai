@@ -1,0 +1,15 @@
+pandas
+numpy
+faker
+sqlalchemy
+psycopg2-binary
+pymongo
+fastapi
+uvicorn
+chromadb
+sentence-transformers
+spacy
+rapidfuzz
+google-genai
+redis
+python-dotenv
