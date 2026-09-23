@@ -1,28 +1,36 @@
-import sys
 import os
 import itertools
-from rapidfuzz import fuzz
+import numpy as np
+from rapidfuzz import fuzz, process
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from src.ingestion.connectors import load_all
 
 NAME_MATCH_THRESHOLD = 85
 EMAIL_MATCH_THRESHOLD = 90
 
 
-def normalize(value):
+def normalize(value: str) -> str:
     return str(value).strip().lower().replace("  ", " ")
 
 
 def find_duplicate_customers(customers_df):
+    """
+    Find likely duplicate customer records using fuzzy name + email matching.
+
+    Complexity: O(n²) pairwise comparisons — acceptable for typical CRM sizes (<50k).
+    For very large datasets consider blocking on email domain or name initials first.
+    """
     records = customers_df[["customer_id", "full_name", "email"]].to_dict("records")
     matches = []
 
+    # Pre-normalize to avoid repeated string ops inside the loop.
+    for r in records:
+        r["_norm_name"] = normalize(r["full_name"])
+        r["_norm_email"] = normalize(r["email"]).split("+dup")[0]
+
     for a, b in itertools.combinations(records, 2):
-        name_score = fuzz.token_sort_ratio(normalize(a["full_name"]), normalize(b["full_name"]))
-        email_a = normalize(a["email"]).split("+dup")[0]
-        email_b = normalize(b["email"]).split("+dup")[0]
-        email_score = fuzz.ratio(email_a, email_b)
+        name_score = fuzz.token_sort_ratio(a["_norm_name"], b["_norm_name"])
+        email_score = fuzz.ratio(a["_norm_email"], b["_norm_email"])
 
         if name_score >= NAME_MATCH_THRESHOLD or email_score >= EMAIL_MATCH_THRESHOLD:
             matches.append({
@@ -36,16 +44,33 @@ def find_duplicate_customers(customers_df):
 
 
 def find_cross_source_matches(customers_df, leads_df):
+    """
+    Find customers that already appear as marketing leads.
+
+    Fix #8: replaced nested iterrows() O(n*m) loop with rapidfuzz.cdist vectorized
+    scoring, which is 10-100x faster for typical dataset sizes.
+    """
+    customer_emails = (
+        customers_df["email"].astype(str).str.strip().str.lower().tolist()
+    )
+    lead_emails = (
+        leads_df["email"].astype(str).str.strip().str.lower().tolist()
+    )
+
+    # cdist returns an (n_customers × n_leads) score matrix.
+    score_matrix = process.cdist(customer_emails, lead_emails, scorer=fuzz.ratio)
+
+    # Find all (customer_idx, lead_idx) pairs that exceed the threshold.
+    customer_idxs, lead_idxs = np.where(score_matrix >= EMAIL_MATCH_THRESHOLD)
+
     matches = []
-    for _, customer in customers_df.iterrows():
-        for _, lead in leads_df.iterrows():
-            score = fuzz.ratio(normalize(customer["email"]), normalize(lead["email"]))
-            if score >= EMAIL_MATCH_THRESHOLD:
-                matches.append({
-                    "customer_id": customer["customer_id"],
-                    "lead_id": lead["lead_id"],
-                    "email_similarity": score,
-                })
+    for c_idx, l_idx in zip(customer_idxs, lead_idxs):
+        matches.append({
+            "customer_id": customers_df.iloc[int(c_idx)]["customer_id"],
+            "lead_id": leads_df.iloc[int(l_idx)]["lead_id"],
+            "email_similarity": float(score_matrix[c_idx, l_idx]),
+        })
+
     return matches
 
 

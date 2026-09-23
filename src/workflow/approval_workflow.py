@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 AUDIT_LOG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "audit_log.jsonl")
@@ -28,13 +28,15 @@ class CorrectiveAction:
         self.history = []
 
     def _log(self, note):
+        # Fix #5: use timezone-aware UTC datetime (utcnow() is deprecated in Python 3.12+)
         entry = {
             "action_id": self.action_id,
             "stage": self.stage.value,
             "note": note,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         self.history.append(entry)
+        os.makedirs(os.path.dirname(AUDIT_LOG_PATH), exist_ok=True)
         with open(AUDIT_LOG_PATH, "a") as f:
             f.write(json.dumps(entry) + "\n")
 
@@ -75,6 +77,29 @@ class CorrectiveAction:
         self.stage = WorkflowStage.VERIFIED
         self._log(f"verified: {'passed' if passed else 'failed'}")
         return self
+
+    # --- Serialization (needed for Redis-backed storage) ---
+
+    def to_dict(self):
+        return {
+            "action_id": self.action_id,
+            "issue_type": self.issue_type,
+            "target": self.target,
+            "detail": self.detail,
+            "stage": self.stage.value,
+            "explanation": self.explanation,
+            "proposal": self.proposal,
+            "history": self.history,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        action = cls(data["action_id"], data["issue_type"], data["target"], data["detail"])
+        action.stage = WorkflowStage(data["stage"])
+        action.explanation = data.get("explanation")
+        action.proposal = data.get("proposal")
+        action.history = data.get("history", [])
+        return action
 
 
 def example_dedupe_workflow(action_id, duplicate_pair):

@@ -3,23 +3,43 @@ import json
 import chromadb
 from sentence_transformers import SentenceTransformer
 from google import genai
-from google.genai import types
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 CHROMA_HOST = os.environ.get("CHROMA_HOST", "localhost")
 CHROMA_PORT = int(os.environ.get("CHROMA_PORT", 8001))
 COLLECTION_NAME = "data_catalog"
-
-chroma_client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
-
-gemini_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+# Lazy-initialized singletons — avoids crashes at import time if Chroma/model not ready.
+_chroma_client = None
+_embedder = None
+_gemini_client = None
+
+
+def _get_chroma_client():
+    global _chroma_client
+    if _chroma_client is None:
+        _chroma_client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
+    return _chroma_client
+
+
+def _get_embedder():
+    global _embedder
+    if _embedder is None:
+        _embedder = SentenceTransformer("all-MiniLM-L6-v2")
+    return _embedder
+
+
+def _get_gemini_client():
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    return _gemini_client
 
 
 def retrieve_catalog_entries(query, top_k=4):
-    collection = chroma_client.get_collection(COLLECTION_NAME)
-    query_embedding = embedder.encode([query]).tolist()
+    collection = _get_chroma_client().get_collection(COLLECTION_NAME)
+    query_embedding = _get_embedder().encode([query]).tolist()
     results = collection.query(query_embeddings=query_embedding, n_results=top_k)
     return results["documents"][0] if results["documents"] else []
 
@@ -47,7 +67,7 @@ Question: {user_query}
 
 Answer using only the catalog data above."""
 
-    response = gemini_client.models.generate_content(
+    response = _get_gemini_client().models.generate_content(
         model=GEMINI_MODEL,
         contents=prompt,
     )
