@@ -22,11 +22,6 @@ __pycache__/
 dist/
 build/
 
-# Testing & Coverage
-.pytest_cache/
-.coverage
-htmlcov/
-
 # IDE
 .vscode/
 .idea/
