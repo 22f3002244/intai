@@ -132,7 +132,13 @@ def invalidate_entity_resolution_cache():
 
 @app.post("/query", summary="Ask a question about the data in plain English")
 def query(request: QueryRequest):
-    return {"answer": answer_query(request.question)}
+    try:
+        return {"answer": answer_query(request.question)}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"AI query service temporarily unavailable: {exc}",
+        ) from exc
 
 
 # ── Corrective-action workflow endpoints ───────────────────────────────────────

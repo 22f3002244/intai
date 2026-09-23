@@ -1,8 +1,10 @@
 import os
 import json
+import time
 import chromadb
 from sentence_transformers import SentenceTransformer
 from google import genai
+from google.genai.errors import ServerError, APIError
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 CHROMA_HOST = os.environ.get("CHROMA_HOST", "localhost")
@@ -51,8 +53,7 @@ def load_entity_resolution_summary():
     with open(path) as f:
         return json.load(f)
 
-
-def answer_query(user_query):
+def answer_query(user_query, max_retries=3, initial_delay=1.5):
     catalog_matches = retrieve_catalog_entries(user_query)
     dedupe_summary = load_entity_resolution_summary()
 
@@ -67,11 +68,27 @@ Question: {user_query}
 
 Answer using only the catalog data above."""
 
-    response = _get_gemini_client().models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-    )
-    return response.text
+    client = _get_gemini_client()
+    delay = initial_delay
+    last_err = None
+
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+            )
+            return response.text
+        except (ServerError, APIError) as e:
+            last_err = e
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+                delay *= 2
+            else:
+                raise RuntimeError(
+                    f"Gemini service unavailable after {max_retries} attempts ({e}). "
+                    "The model is experiencing high demand; please try again in a few moments or switch GEMINI_MODEL."
+                ) from e
 
 
 if __name__ == "__main__":
